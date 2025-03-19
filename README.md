@@ -1,0 +1,1 @@
+# Bayesian-Analysis-in-Figgie-Estimating-the-Goal-Suit-from-Partial-Information
