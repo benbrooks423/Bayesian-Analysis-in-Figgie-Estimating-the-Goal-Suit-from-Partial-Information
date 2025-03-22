@@ -1,0 +1,132 @@
+from scipy.stats import hypergeom
+#Hand_counts is a dictionary with the keys being suits and values the no. of each in hand
+#revealed_counts is a dictionary with the keys being suits and values the no. of each revealed
+
+def compute_figgie_probabilities(hand_counts, revealed_counts):
+    deck_size = 40  #Total cards in deck
+    hand_size = 10 + sum(revealed_counts.values())  #Cards in hand plus revealed cards
+    suit_sizes = [8, 10, 12]  #Possible suit sizes
+    priors = {8: 1/4, 10: 1/2, 12: 1/4}  #Prior probabilities
+    
+    posteriors = {}  
+    
+    for suit in hand_counts:
+        total_obs = hand_counts[suit] + revealed_counts.get(suit, 0)  #Calculate total observed cards for each given suit
+        likelihoods = {N: hypergeom.pmf(total_obs, deck_size, N, hand_size) for N in suit_sizes} #Compute likelihoods using hypergeometric distribution for each possible suit size
+        unnormalised_posteriors = {N: likelihoods[N] * priors[N] for N in suit_sizes} #the unnormalized posterior probability is calculated using bayes theorem
+        total_prob = sum(unnormalised_posteriors.values()) #posterir probabilities are normalised (make sure they sum to 1
+        posteriors[suit] = {N: unnormalised_posteriors[N] / total_prob for N in suit_sizes} 
+    
+    return posteriors
+
+def compute_prob_most_suit(hand_counts, suit, probabilities):
+    my_count = hand_counts[suit]  #My count of the goal suit
+    deck_size = 40 - 10  #Remaining deck after my hand
+    opponents = 3  #Number of other players
+    
+    
+    prob_total = 0.0
+    for suit_size in [8, 10]:  # Goal suit can only have 8 or 10 cards
+        prob_size = probabilities.get(suit_size, 0)
+        
+        remaining_suit = suit_size - my_count
+        if remaining_suit < 0:
+            continue  #Impossible case, skip
+        
+        prob_no_opponent_has_more = 1.0
+        for i in range(my_count + 1, remaining_suit + 1):
+            prob_someone_has_i = hypergeom.sf(i - 1, deck_size, remaining_suit, 10) #Compute the probability an opponent has i cards using the survival function of the hypergeometric distribution, possible error, assumes oponent has 10 cards, have to add variable keeping count of each players cards to be more accurate
+            prob_no_opponent_has_more *= (1 - prob_someone_has_i) ** opponents
+        
+        prob_total += prob_no_opponent_has_more * prob_size
+    
+    return prob_total
+
+def compute_expected_value_of_buying(hand_counts, probabilities):
+    expected_value_per_card = {}
+    
+    for suit in probabilities:
+        colour_groups = {'hearts': 'diamonds', 'diamonds': 'hearts', 'spades': 'clubs', 'clubs': 'spades'}
+        suit_probs = probabilities.get(colour_groups[suit],{}) #probability given suit is the goal suit is equal to probability its same coloured counterpart is the most common suit
+        suit_prob_12 = suit_probs.get(12, 0) 
+        base_ev_per_card = suit_prob_12 * 10 
+
+        suit_probs = probabilities[suit]
+
+        prob_most_before = compute_prob_most_suit(hand_counts, suit, suit_probs)
+        hand_counts[suit] += 1  #simulate buying a card
+        prob_most_after = compute_prob_most_suit(hand_counts, suit, suit_probs)
+        hand_counts[suit] -= 1  #revert after simulation
+        
+        ev_bonus = suit_prob_12 * (prob_most_after - prob_most_before) * 100 #probability given suit is the goalsuit times the change in likelihood of possessing the largest amount of this suit times the bonus of $100
+        expected_value_per_card[suit] = base_ev_per_card  + ev_bonus
+    return expected_value_per_card
+
+def find_goal_suit(twelve_card_suits): #probability given suit is the goal suit is equal to probability its same coloured counterpart is the most common suit
+    color_groups = {'hearts': 'diamonds', 'diamonds': 'hearts', 'spades': 'clubs', 'clubs': 'spades'}
+    return [color_groups[suit] for suit in twelve_card_suits]
+
+def main():
+    print("Enter your 10-card hand composition (number of each suit):") 
+    hand_counts = {}
+    for suit in ['diamonds', 'hearts', 'spades', 'clubs']:
+        count = int(input(f"Enter number of {suit}: "))
+        hand_counts[suit] = count
+    
+    revealed_counts = {'diamonds': 0, 'hearts': 0, 'spades': 0, 'clubs': 0}
+    while True:
+        print("\nDo you want to enter a revealed card? (yes/no)")
+        choice = input().strip().lower()
+        if choice != 'yes':
+            break
+        suit = input("Enter revealed card suit (diamonds, hearts, spades, clubs): ").strip().lower()
+        if suit in revealed_counts:
+            revealed_counts[suit] += 1
+        else:
+            print("Invalid suit, try again.")
+    
+    while True:
+        print("\nDo you want to buy or sell a card? (buy/sell/none)")
+        trade_choice = input().strip().lower()
+        if trade_choice == 'none':
+            break
+        suit = input("Enter suit of traded card (diamonds, hearts, spades, clubs): ").strip().lower()
+        if suit not in hand_counts:
+            print("Invalid suit, try again.")
+            continue
+        if trade_choice == 'buy':
+            hand_counts[suit] += 1
+        elif trade_choice == 'sell':
+            if hand_counts[suit] > 0:
+                hand_counts[suit] -= 1
+            else:
+                print("You have no cards of this suit to sell.")
+    
+    probabilities = compute_figgie_probabilities(hand_counts, revealed_counts)
+    
+    max_prob = max(probabilities[suit][12] for suit in probabilities) #Find the maximum probability for P(12)
+    
+    likely_12_suits = [suit for suit in probabilities if probabilities[suit][12] == max_prob] #Find all suits that have this max probability
+    goal_suits = find_goal_suit(likely_12_suits) #convert likely common suit to its goal counterpart
+    
+    print("\nUpdated Suit Probabilities:")
+    for suit, probs in probabilities.items():
+        print(f"{suit}: P(12)={probs[12]:.2%}, P(10)={probs[10]:.2%}, P(8)={probs[8]:.2%}")
+    
+    print(f"\nMost Likely 12-card Suits: {', '.join(likely_12_suits)}")
+    print(f"Most Likely Goal Suits: {', '.join(goal_suits)}")
+
+    
+
+    for suit in probabilities:
+        suit_probs = probabilities[suit]
+        prob_most = compute_prob_most_suit(hand_counts, suit, suit_probs)
+        print(f"\nProbability you have the most of the {suit} suit: {prob_most:.2%}")
+
+    
+    ev_buying = compute_expected_value_of_buying(hand_counts, probabilities)
+    print("\nExpected Value of Buying a Card for Each Suit:")
+    for suit, ev in ev_buying.items():
+        print(f"{suit}: ${ev:.2f}")
+        
+main()
